@@ -1,25 +1,19 @@
 package me.leon.view
 
 import javafx.beans.property.SimpleBooleanProperty
-import javafx.geometry.Pos
 import javafx.scene.control.*
-import kotlin.collections.chunked
-import kotlin.collections.contains
-import kotlin.collections.distinct
-import kotlin.collections.first
-import kotlin.collections.joinToString
-import kotlin.collections.mutableMapOf
 import kotlin.collections.set
-import kotlin.collections.sorted
-import kotlin.collections.sortedDescending
-import kotlin.collections.toList
+import kotlin.system.measureTimeMillis
 import me.leon.SimpleMsgEvent
+import me.leon.Styles
 import me.leon.encode.base.base64
 import me.leon.ext.*
+import me.leon.ext.crypto.EncodeType
+import me.leon.ext.fx.*
 import tornadofx.*
 import tornadofx.FX.Companion.messages
 
-class StringProcessView : View(messages["stringProcess"]) {
+class StringProcessView : Fragment(messages["stringProcess"]) {
     override val closeable = SimpleBooleanProperty(false)
     private val isRegexp = SimpleBooleanProperty(false)
     private val isSplitRegexp = SimpleBooleanProperty(false)
@@ -64,17 +58,19 @@ class StringProcessView : View(messages["stringProcess"]) {
         }
 
     private lateinit var labelInfo: Label
+    private var timeConsumption = 0L
     private val info: String
         get() =
-            " ${messages["inputLength"]}:" +
-                " ${inputText.length}  ${messages["outputLength"]}: ${outputText.length} " +
-                "lines(input/output):${inputText.lineCount()} / ${outputText.lineCount()}"
+            " ${messages["inputLength"]}: " +
+                "${inputText.length}  ${messages["outputLength"]}: ${outputText.length} " +
+                "lines(in/out): ${inputText.lineCount()} / ${outputText.lineCount()} " +
+                "cost: $timeConsumption ms"
     private var inputText: String
         get() =
             taInput.text.takeIf {
                 isEncode || encodeType in arrayOf(EncodeType.Decimal, EncodeType.Octal)
             }
-                ?: taInput.text.replace("\\s".toRegex(), "")
+                ?: taInput.text.stripAllSpace()
         set(value) {
             taInput.text = value
         }
@@ -92,67 +88,101 @@ class StringProcessView : View(messages["stringProcess"]) {
     private var encodeType = EncodeType.Base64
     private var isEncode = true
 
-    private val eventHandler = fileDraggedHandler { taInput.text = it.first().readText() }
+    private val eventHandler = fileDraggedHandler {
+        taInput.text =
+            with(it.first()) {
+                if (length() <= 10 * 1024 * 1024)
+                    if (realExtension() in unsupportedExts) "unsupported file extension"
+                    else readText()
+                else "not support file larger than 10M"
+            }
+    }
 
     private val centerNode = vbox {
-        paddingAll = DEFAULT_SPACING
-        spacing = DEFAULT_SPACING
+        addClass(Styles.group)
         hbox {
             label(messages["input"])
             spacing = DEFAULT_SPACING
             button(graphic = imageview("/img/import.png")) {
                 action {
                     inputText = clipboardText()
+                    timeConsumption = 0
                     labelInfo.text = info
                 }
             }
             button(graphic = imageview("/img/uppercase.png")) {
                 action { outputText = inputText.uppercase() }
             }
+
             button(graphic = imageview("/img/lowercase.png")) {
                 action { outputText = inputText.lowercase() }
             }
+            button(graphic = imageview("/img/trimIndent.png")) {
+                action { outputText = inputText.trimIndent() }
+            }
             button(graphic = imageview("/img/ascend.png")) {
                 action {
-                    outputText =
-                        inputText
-                            .split("\n|\r\n".toRegex())
-                            .sorted()
-                            .joinToString(System.lineSeparator())
-                    labelInfo.text = info
+                    measureTimeMillis {
+                        outputText =
+                            inputText
+                                .split("\n|\r\n".toRegex())
+                                .sorted()
+                                .joinToString(System.lineSeparator())
+                    }
+                        .also {
+                            timeConsumption = it
+                            labelInfo.text = info
+                        }
                 }
             }
             button(graphic = imageview("/img/descend.png")) {
                 action {
-                    outputText =
-                        inputText
-                            .split("\n|\r\n".toRegex())
-                            .sortedDescending()
-                            .joinToString(System.lineSeparator())
-                    labelInfo.text = info
+                    measureTimeMillis {
+                        outputText =
+                            inputText
+                                .split("\n|\r\n".toRegex())
+                                .sortedDescending()
+                                .joinToString(System.lineSeparator())
+                    }
+                        .also {
+                            timeConsumption = it
+                            labelInfo.text = info
+                        }
                 }
             }
 
             button(graphic = imageview("/img/deduplicate.png")) {
                 action {
-                    outputText =
-                        inputText
-                            .split("\n|\r\n".toRegex())
-                            .distinct()
-                            .joinToString(System.lineSeparator())
-                    labelInfo.text = info
+                    measureTimeMillis {
+                        outputText =
+                            inputText
+                                .split("\n|\r\n".toRegex())
+                                .distinct()
+                                .joinToString(System.lineSeparator())
+                    }
+                        .also {
+                            timeConsumption = it
+                            labelInfo.text = info
+                        }
                 }
             }
             button(graphic = imageview("/img/statistic.png")) {
                 action {
-                    outputText =
-                        inputText
-                            .fold(mutableMapOf<Char, Int>()) { acc, c ->
-                                acc.apply { acc[c] = (acc[c] ?: 0) + 1 }
-                            }
-                            .toList()
-                            .joinToString(System.lineSeparator()) { "${it.first}: ${it.second}" }
-                    labelInfo.text = info
+                    measureTimeMillis {
+                        outputText =
+                            inputText
+                                .fold(mutableMapOf<Char, Int>()) { acc, c ->
+                                    acc.apply { acc[c] = (acc[c] ?: 0) + 1 }
+                                }
+                                .toList()
+                                .joinToString(System.lineSeparator()) {
+                                    "${it.first}: ${it.second}"
+                                }
+                    }
+                        .also {
+                            timeConsumption = it
+                            labelInfo.text = info
+                        }
                 }
             }
         }
@@ -179,13 +209,21 @@ class StringProcessView : View(messages["stringProcess"]) {
                             runAsync { inputText.readHeadersFromNet() } ui { taInput.text = it }
                         }
                     }
+
+                    item(messages["recoverEncoding"]) {
+                        action { runAsync { inputText.recoverEncoding() } ui { taInput.text = it } }
+                    }
+                    item("reverse") { action { taInput.text = inputText.reversed() } }
+                }
+                textProperty().addListener { _, _, _ ->
+                    timeConsumption = 0
+                    labelInfo.text = info
                 }
             }
         hbox {
-            alignment = Pos.CENTER_LEFT
+            addClass(Styles.left)
             paddingTop = DEFAULT_SPACING
             paddingBottom = DEFAULT_SPACING
-            spacing = DEFAULT_SPACING
             label(messages["replace"])
             tfReplaceFrom = textfield { promptText = messages["text2Replaced"] }
             tfReplaceTo = textfield { promptText = messages["replaced"] }
@@ -193,22 +231,20 @@ class StringProcessView : View(messages["stringProcess"]) {
             button(messages["run"], imageview("/img/run.png")) { action { doReplace() } }
         }
         hbox {
-            alignment = Pos.CENTER_LEFT
+            addClass(Styles.left)
             paddingTop = DEFAULT_SPACING
             paddingBottom = DEFAULT_SPACING
-            spacing = DEFAULT_SPACING
             label(messages["split"])
             tfSplitLength = textfield { promptText = messages["splitLength"] }
-            tfSeprator = textfield { promptText = messages["seprator"] }
+            tfSeprator = textfield { promptText = messages["delimiter"] }
             checkbox(messages["regexp"], isSplitRegexp) { isVisible = false }
             button(messages["run"], imageview("/img/run.png")) { action { doSplit() } }
         }
 
         hbox {
-            alignment = Pos.CENTER_LEFT
+            addClass(Styles.left)
             paddingTop = DEFAULT_SPACING
             paddingBottom = DEFAULT_SPACING
-            spacing = DEFAULT_SPACING
             label(messages["extract"])
             tfExtract =
                 textfield {
@@ -240,16 +276,27 @@ class StringProcessView : View(messages["stringProcess"]) {
     }
 
     private fun doExtract() {
-        outputText = extractReg.toRegex().findAll(inputText).map { it.value }.joinToString("\n")
-        labelInfo.text = info
+        measureTimeMillis {
+            outputText = extractReg.toRegex().findAll(inputText).map { it.value }.joinToString("\n")
+        }
+            .also {
+                timeConsumption = it
+                labelInfo.text = info
+            }
     }
 
     private fun doSplit() {
-        outputText =
-            inputText.toList().chunked(splitLengthText).joinToString(sepratorText) {
-                it.joinToString("")
+
+        measureTimeMillis {
+            outputText =
+                inputText.toList().chunked(splitLengthText).joinToString(sepratorText) {
+                    it.joinToString("")
+                }
+        }
+            .also {
+                timeConsumption = it
+                labelInfo.text = info
             }
-        labelInfo.text = info
     }
 
     override val root = borderpane {
@@ -258,12 +305,17 @@ class StringProcessView : View(messages["stringProcess"]) {
     }
 
     private fun doReplace() {
-        if (replaceFromText.isNotEmpty()) {
-            println(replaceToText)
-            outputText =
-                if (isRegexp.get()) inputText.replace(replaceFromText.toRegex(), replaceToText)
-                else inputText.replace(replaceFromText, replaceToText)
+        measureTimeMillis {
+            if (replaceFromText.isNotEmpty()) {
+                println(replaceToText)
+                outputText =
+                    if (isRegexp.get()) inputText.replace(replaceFromText.toRegex(), replaceToText)
+                    else inputText.replace(replaceFromText, replaceToText)
+            }
         }
-        labelInfo.text = info
+            .also {
+                timeConsumption = it
+                labelInfo.text = info
+            }
     }
 }

@@ -1,19 +1,25 @@
 package me.leon.view
 
-import javafx.beans.property.SimpleBooleanProperty
-import javafx.beans.property.SimpleStringProperty
-import javafx.geometry.Pos
+import javafx.beans.property.*
 import javafx.scene.control.*
+import me.leon.Styles
 import me.leon.controller.AsymmetricCryptoController
 import me.leon.encode.base.base64
 import me.leon.ext.*
+import me.leon.ext.crypto.*
+import me.leon.ext.fx.*
 import tornadofx.*
 
-class AsymmetricCryptoView : View(FX.messages["asymmetric"]) {
+class AsymmetricCryptoView : Fragment(FX.messages["asymmetric"]) {
     private val controller: AsymmetricCryptoController by inject()
     override val closeable = SimpleBooleanProperty(false)
     private val isSingleLine = SimpleBooleanProperty(false)
     private val privateKeyEncrypt = SimpleBooleanProperty(false)
+    private val isProcessing = SimpleBooleanProperty(false)
+    private val isEnablePadding = SimpleBooleanProperty(true)
+    private val isShowDerivedKey = SimpleBooleanProperty(true)
+
+    private var cbBits: ComboBox<Number> by singleAssign()
     lateinit var taInput: TextArea
     lateinit var taKey: TextArea
     lateinit var taOutput: TextArea
@@ -27,68 +33,97 @@ class AsymmetricCryptoView : View(FX.messages["asymmetric"]) {
         set(value) {
             taOutput.text = value
         }
+    private var timeConsumption = 0L
+    private var startTime = 0L
     private val info
         get() =
-            "RSA  bits: ${selectedBits.get()}  mode: ${
+            "${selectedAlg.get()}  bits: ${selectedBits.get()}  mode: ${
                 if (privateKeyEncrypt.get()) "private key encrypt"
                 else "public key encrypt"
-            } "
+            }  " +
+                "${messages["inputLength"]}: ${inputText.length}  " +
+                "${messages["outputLength"]}: ${outputText.length}  " +
+                "cost: $timeConsumption ms"
+    private val selectedPadding = SimpleStringProperty(RSA_PADDINGS.first())
     private lateinit var labelInfo: Label
     private var keyText: String
-        get() =
-            taKey.text.takeIf { it.contains("-----BEGIN CERTIFICATE") }
-                ?: taKey.text.replace(
-                    "-----(?:END|BEGIN) (?:RSA )?\\w+ KEY-----|\n|\r|\r\n".toRegex(),
-                    ""
-                )
+        get() = taKey.text.trim()
         set(value) {
             taKey.text = value
         }
 
-    private var alg = "RSA"
+    private val alg
+        get() =
+            with(selectedAlg.get()) {
+                if (this == "RSA") "$this/NONE/${selectedPadding.get()}" else this
+            }
     private var isEncrypt = true
-    private val bitsLists = mutableListOf("512", "1024", "2048", "3072", "4096")
-    private val selectedBits = SimpleStringProperty("1024")
-    private val isPriEncryptOrPubDecrypt
-        get() = privateKeyEncrypt.get() && isEncrypt || !privateKeyEncrypt.get() && !isEncrypt
+    private var inputEncode = "raw"
+    private var outputEncode = "base64"
+    private lateinit var tgInput: ToggleGroup
+    private lateinit var tgOutput: ToggleGroup
 
-    private val eventHandler = fileDraggedHandler {
+    private val algos = ASYMMETRIC_ALGOS.keys.toMutableList()
+    private val selectedAlg = SimpleStringProperty(algos.first())
+    private val selectedBits = SimpleIntegerProperty(ASYMMETRIC_ALGOS[selectedAlg.get()]!!.first())
+    private val isPrivateKey
+        get() = isEncrypt && privateKeyEncrypt.get() || !isEncrypt && !privateKeyEncrypt.get()
+
+    private val keyEventHandler = fileDraggedHandler {
         val firstFile = it.first()
         keyText =
-            if (firstFile.name.endsWith("pk8")) firstFile.readBytes().base64()
-            else firstFile.readText()
-
-        with(keyText) {
-            val probablyKeySize =
-                if (isPriEncryptOrPubDecrypt) this.length * 1.25f else this.length * 5
-            println("__ $probablyKeySize")
-            val keySize =
-                when (probablyKeySize.toInt()) {
-                    in 3300..4500 -> 4096
-                    in 2600..3300 -> 3072
-                    in 1600..2200 -> 2048
-                    in 800..1200 -> 1024
-                    else -> 512
+            if (firstFile.extension in listOf("pk8", "key", "der")) firstFile.readBytes().base64()
+            else if (firstFile.extension in listOf("cer", "crt"))
+                firstFile.parsePublicKeyFromCerFile()
+            else
+                with(firstFile) {
+                    if (length() <= 128 * 1024)
+                        if (realExtension() in unsupportedExts) "unsupported file extension"
+                        else readText()
+                    else "not support file larger than 128KB"
                 }
-            selectedBits.set(keySize.toString())
-        }
+        updateKeySize()
     }
+
+    private fun updateKeySize() {
+        runAsync {
+            runCatching {
+                    if (isPrivateKey) {
+                        controller.lengthFromPri(keyText)
+                    } else {
+                        controller.lengthFromPub(keyText)
+                    }
+                }
+                .getOrDefault(1024)
+        } ui { selectedBits.set(it) }
+    }
+
+    private val inputEventHandler = fileDraggedHandler {
+        taInput.text =
+            with(it.first()) {
+                if (length() <= 128 * 1024)
+                    if (realExtension() in unsupportedExts) "unsupported file extension"
+                    else readText()
+                else "not support file larger than 128KB"
+            }
+    }
+
     private val centerNode = vbox {
         paddingAll = DEFAULT_SPACING
         spacing = DEFAULT_SPACING
-        hbox {
-            label(messages["key"])
-            button(graphic = imageview("/img/import.png")) { action { keyText = clipboardText() } }
-        }
-        taKey =
-            textarea {
-                promptText = messages["inputHint"]
-                isWrapText = true
-                onDragEntered = eventHandler
-            }
 
         hbox {
+            addClass(Styles.left)
             label(messages["input"]) { tooltip("加密时为明文,解密时为base64编码的密文") }
+            tgInput =
+                togglegroup {
+                    radiobutton("raw") { isSelected = true }
+                    radiobutton("base64")
+                    radiobutton("hex")
+                    selectedToggleProperty().addListener { _, _, newValue ->
+                        inputEncode = newValue.cast<RadioButton>().text
+                    }
+                }
             button(graphic = imageview("/img/import.png")) {
                 action { inputText = clipboardText() }
             }
@@ -97,19 +132,60 @@ class AsymmetricCryptoView : View(FX.messages["asymmetric"]) {
             textarea {
                 promptText = messages["inputHint"]
                 isWrapText = true
-                prefHeight = DEFAULT_SPACING_10X
+                prefHeight = DEFAULT_SPACING_16X
+                onDragEntered = inputEventHandler
             }
 
         hbox {
-            alignment = Pos.CENTER_LEFT
+            label(messages["key"])
+            button(graphic = imageview("/img/import.png")) {
+                action {
+                    keyText = clipboardText()
+                    updateKeySize()
+                }
+            }
+        }
+        taKey =
+            textarea {
+                promptText = messages["inputHintAsy"]
+                isWrapText = true
+                onDragEntered = keyEventHandler
+            }
+
+        hbox {
+            addClass(Styles.left)
+            label(messages["alg"])
+            combobox(selectedAlg, algos) { cellFormat { text = it.toString() } }
+            selectedAlg.addListener { _, _, newValue ->
+                newValue?.run {
+                    cbBits.items = ASYMMETRIC_ALGOS[newValue]!!.asObservable()
+                    selectedBits.set(ASYMMETRIC_ALGOS[newValue]!!.first())
+                    cbBits.isDisable = ASYMMETRIC_ALGOS[newValue]!!.size == 1
+                    isEnablePadding.value = newValue == "RSA"
+                    isShowDerivedKey.value = newValue == "RSA"
+                }
+            }
             label(messages["bits"])
-            combobox(selectedBits, bitsLists) { cellFormat { text = it } }
+            cbBits =
+                combobox(selectedBits, ASYMMETRIC_ALGOS[selectedAlg.get()]) {
+                    cellFormat { text = it.toString() }
+                }
+            label("padding:")
+            combobox(selectedPadding, RSA_PADDINGS) {
+                enableWhen(isEnablePadding)
+                cellFormat { text = it }
+            }
+        }
+        hbox {
+            addClass(Styles.center)
             togglegroup {
                 spacing = DEFAULT_SPACING
                 radiobutton(messages["encrypt"]) { isSelected = true }
                 radiobutton(messages["decrypt"])
                 selectedToggleProperty().addListener { _, _, new ->
                     isEncrypt = new.cast<RadioButton>().text == messages["encrypt"]
+                    tgOutput.selectToggle(tgOutput.toggles[if (isEncrypt) 1 else 0])
+                    if (isEncrypt) tgInput.selectToggle(tgInput.toggles[0])
                 }
             }
             checkbox(messages["singleLine"], isSingleLine)
@@ -119,17 +195,56 @@ class AsymmetricCryptoView : View(FX.messages["asymmetric"]) {
 
             button(messages["run"], imageview("/img/run.png")) { action { doCrypto() } }
             button(messages["genKeypair"]) {
-                action { "https://miniu.alipay.com/keytool/create".openInBrowser() }
+                enableWhen(!isProcessing)
+                action {
+                    isProcessing.value = true
+                    runAsync { genBase64KeyArray(alg, listOf(selectedBits.value.toInt())) } ui
+                        {
+                            isProcessing.value = false
+                            if (isPrivateKey) {
+                                taInput.text = it[0]
+                                taKey.text = it[1]
+                            } else {
+                                taInput.text = it[1]
+                                taKey.text = it[0]
+                            }
+                        }
+                }
+            }
+            button(messages["deriveKey"]) {
+                visibleWhen(isShowDerivedKey)
+                enableWhen(!isProcessing)
+                action {
+                    isProcessing.value = true
+                    runAsync { catch({ it }) { taKey.text.privateKeyDerivedPublicKey(alg) } } ui
+                        {
+                            isProcessing.value = false
+                            taOutput.text = it
+                        }
+                }
             }
         }
         hbox {
-            spacing = DEFAULT_SPACING
+            addClass(Styles.left)
             label(messages["output"])
+            tgOutput =
+                togglegroup {
+                    radiobutton("raw")
+                    radiobutton("base64") { isSelected = true }
+                    radiobutton("hex")
+                    selectedToggleProperty().addListener { _, _, newValue ->
+                        println("output ${newValue.cast<RadioButton>().text}")
+                        outputEncode = newValue.cast<RadioButton>().text
+                    }
+                }
             button(graphic = imageview("/img/copy.png")) { action { outputText.copy() } }
             button(graphic = imageview("/img/up.png")) {
                 action {
                     inputText = outputText
                     outputText = ""
+                    tgInput.selectToggle(
+                        tgInput.toggles[tgOutput.toggles.indexOf(tgOutput.selectedToggle)]
+                    )
                 }
             }
         }
@@ -151,42 +266,50 @@ class AsymmetricCryptoView : View(FX.messages["asymmetric"]) {
         }
 
         runAsync {
+            isProcessing.value = true
+            startTime = System.currentTimeMillis()
             if (isEncrypt)
                 if (privateKeyEncrypt.get())
                     controller.priEncrypt(
                         keyText,
                         alg,
                         inputText,
-                        selectedBits.get().toInt(),
-                        isSingleLine.get()
+                        isSingleLine.get(),
+                        inputEncode = inputEncode,
+                        outputEncode = outputEncode
                     )
                 else
                     controller.pubEncrypt(
                         keyText,
                         alg,
                         inputText,
-                        selectedBits.get().toInt(),
-                        isSingleLine.get()
+                        isSingleLine.get(),
+                        inputEncode = inputEncode,
+                        outputEncode = outputEncode
                     )
             else if (privateKeyEncrypt.get())
                 controller.pubDecrypt(
                     keyText,
                     alg,
                     inputText,
-                    selectedBits.get().toInt(),
-                    isSingleLine.get()
+                    isSingleLine.get(),
+                    inputEncode,
+                    outputEncode
                 )
             else
                 controller.priDecrypt(
                     keyText,
                     alg,
                     inputText,
-                    selectedBits.get().toInt(),
-                    isSingleLine.get()
+                    isSingleLine.get(),
+                    inputEncode,
+                    outputEncode
                 )
         } ui
             {
+                isProcessing.value = false
                 outputText = it
+                timeConsumption = System.currentTimeMillis() - startTime
                 labelInfo.text = info
                 if (Prefs.autoCopy) it.copy().also { primaryStage.showToast(messages["copied"]) }
             }

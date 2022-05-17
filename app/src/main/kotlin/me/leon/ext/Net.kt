@@ -6,7 +6,52 @@ import java.net.URL
 private const val DEFAULT_TIME_OUT = 10000
 const val RESPONSE_OK = 200
 
-fun String.readBytesFromNet(method: String = "GET", timeout: Int = DEFAULT_TIME_OUT) =
+fun String.readBytesFromNet(
+    method: String = "GET",
+    timeout: Int = DEFAULT_TIME_OUT,
+    data: String = "",
+    headers: Map<String, Any> = mapOf()
+) =
+    runCatching {
+        URL(this)
+            .openConnection()
+            .cast<HttpURLConnection>()
+            .apply {
+                connectTimeout = timeout
+                readTimeout = timeout
+                setRequestProperty("Content-Type", "zh-CN,zh;q=0.9,en;q=0.8")
+                setRequestProperty("Accept-Language", "application/json; charset=utf-8")
+                setRequestProperty(
+                    "user-agent",
+                    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Chrome/86.0.4240.198 Safari/537.36"
+                )
+                for ((k, v) in headers) setRequestProperty(k, v.toString())
+
+                requestMethod = method
+
+                if (method.equals("post", true)) {
+                    val dataBytes = data.toByteArray()
+                    if (dataBytes.isNotEmpty())
+                        addRequestProperty("Content-Length", dataBytes.size.toString())
+                    doOutput = true
+                    connect()
+                    outputStream.write(dataBytes)
+                    outputStream.flush()
+                    outputStream.close()
+                }
+            }
+            .takeIf { it.responseCode == RESPONSE_OK }
+            ?.inputStream
+            ?.readBytes()
+            ?: byteArrayOf()
+    }
+        .getOrElse {
+            println("read bytes err ${it.stacktrace()} ")
+            byteArrayOf()
+        }
+
+fun String.readStreamFromNet(method: String = "GET", timeout: Int = DEFAULT_TIME_OUT) =
     runCatching {
         URL(this)
             .openConnection()
@@ -24,12 +69,10 @@ fun String.readBytesFromNet(method: String = "GET", timeout: Int = DEFAULT_TIME_
             }
             .takeIf { it.responseCode == RESPONSE_OK }
             ?.inputStream
-            ?.readBytes()
-            ?: byteArrayOf()
     }
         .getOrElse {
             println("read bytes err ${it.stacktrace()} ")
-            byteArrayOf()
+            throw IllegalStateException()
         }
 
 fun String.readFromNet(resumeUrl: String = ""): String =
@@ -64,10 +107,8 @@ fun String.readHeadersFromNet(timeout: Int = DEFAULT_TIME_OUT) =
             .joinToString(System.lineSeparator()) {
                 it.second
                     .foldIndexed(StringBuilder()) { i, acc, s ->
-                        acc.apply {
-                            acc.append("${it.first}: $s").apply {
-                                if (i != it.second.lastIndex) append(System.lineSeparator())
-                            }
+                        acc.append("${it.first}: $s").apply {
+                            if (i != it.second.lastIndex) append(System.lineSeparator())
                         }
                     }
                     .toString()

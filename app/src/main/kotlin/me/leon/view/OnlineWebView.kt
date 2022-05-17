@@ -2,26 +2,27 @@ package me.leon.view
 
 import javafx.beans.property.SimpleStringProperty
 import javafx.concurrent.Worker
-import javafx.geometry.Pos
 import javafx.scene.control.TextField
 import javafx.scene.web.WebView
+import me.leon.Styles
 import me.leon.ToolsApp
-import me.leon.ext.DEFAULT_SPACING
 import me.leon.ext.DEFAULT_SPACING_40X
+import me.leon.ext.fx.openInBrowser
 import tornadofx.*
 
-class OnlineWebView : View("Browser") {
-    private lateinit var web: WebView
-    private lateinit var tfUrl: TextField
-
+class OnlineWebView : Fragment("Browser") {
+    private var web: WebView by singleAssign()
+    private var tfUrl: TextField by singleAssign()
     private val selectedUrl = SimpleStringProperty(ToolsApp.extUrls.first())
+    private val fontJS by lazy {
+        javaClass.getResourceAsStream("/js/font.js")?.readBytes()?.decodeToString()
+    }
+
     override val root = borderpane {
         top =
             hbox {
-                spacing = DEFAULT_SPACING
-                paddingAll = DEFAULT_SPACING
-                alignment = Pos.BASELINE_LEFT
-                button("back") {
+                addClass(Styles.group, Styles.left)
+                button(graphic = imageview("img/back.png")) {
                     action {
                         web.engine.history.run {
                             println("currentIndex $currentIndex  $entries.size")
@@ -29,7 +30,7 @@ class OnlineWebView : View("Browser") {
                         }
                     }
                 }
-                button("forward") {
+                button(graphic = imageview("/img/forward.png")) {
                     action {
                         web.engine.history.run {
                             println("forward currentIndex $currentIndex  ${entries.size}")
@@ -37,7 +38,7 @@ class OnlineWebView : View("Browser") {
                         }
                     }
                 }
-
+                button(graphic = imageview("/img/refresh.png")) { action { web.engine.reload() } }
                 tfUrl =
                     textfield(selectedUrl.get()) {
                         promptText = "input url"
@@ -51,12 +52,11 @@ class OnlineWebView : View("Browser") {
                     println("selectedUrl2 ${tfUrl.text}")
                     web.engine.load(tfUrl.text)
                 }
-                button("load") {
+                button(graphic = imageview("/img/run.png")) {
                     action { web.engine.load(tfUrl.text.ifEmpty { selectedUrl.get() }) }
                 }
-                button("refresh") { action { web.engine.reload() } }
-                button("inject") {
-                    action { web.engine.executeScript("\$('.navbar-header').hide()") }
+                button(graphic = imageview("/img/browser.png")) {
+                    action { tfUrl.text.openInBrowser() }
                 }
             }
         center =
@@ -72,9 +72,20 @@ class OnlineWebView : View("Browser") {
                                     "load ${engine.history.entries[engine.history.currentIndex].url}"
                                 )
                                 tfUrl.text = engine.history.entries[engine.history.currentIndex].url
+                                web.engine.executeScript(fontJS).also { println(it) }
                             }
                         }
                     }
+            }
+
+        bottom =
+            hbox {
+                addClass(Styles.group, Styles.left)
+                val tf =
+                    textfield("document.body.style.fontFamily=\"SimSun\"") {
+                        prefWidth = DEFAULT_SPACING_40X
+                    }
+                button("inject js") { action { web.engine.executeScript(tf.text) } }
             }
     }
 }

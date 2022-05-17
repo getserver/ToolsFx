@@ -1,10 +1,7 @@
 package me.leon
 
 import me.leon.encode.base.base64
-import me.leon.ext.cast
-import me.leon.ext.readBytesFromNet
-import me.leon.ext.readHeadersFromNet
-import me.leon.ext.safeAs
+import me.leon.ext.*
 import org.junit.Test
 
 class NetTest {
@@ -30,12 +27,23 @@ class NetTest {
 
     @Test
     fun fetchJson() {
-
         var l: MutableList<String>? = mutableListOf("", "")
         l.safeAs<HashSet<String>>().also { println(it) }
-        //        l?.cast<HashSet<String>>()
         l = null
         l.safeAs<HashSet<String>>().also { println(it) }
         l.cast<HashSet<String>>()
+    }
+
+    @Test
+    fun fileRead() {
+        TEST_PRJ_DIR
+            .listFiles()
+            ?.filter { it.isFile && it.readText().contains("key|flag|ctf".toRegex()) }
+            .also { println(it) }
+    }
+
+    @Test
+    fun fileType() {
+        TEST_PRJ_DIR.listFiles()?.forEach { println(it.realExtension()) }
     }
 }

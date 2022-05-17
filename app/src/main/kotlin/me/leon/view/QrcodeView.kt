@@ -1,8 +1,10 @@
 package me.leon.view
 
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import java.awt.Rectangle
 import java.awt.Robot
 import javafx.beans.property.SimpleBooleanProperty
+import javafx.beans.property.SimpleStringProperty
 import javafx.event.EventHandler
 import javafx.geometry.Pos
 import javafx.scene.Scene
@@ -12,13 +14,18 @@ import javafx.scene.image.ImageView
 import javafx.scene.input.*
 import javafx.scene.layout.*
 import javafx.scene.paint.Paint
+import javafx.scene.text.Text
 import javafx.stage.Stage
 import javafx.stage.StageStyle
 import kotlin.math.abs
+import me.leon.Styles
+import me.leon.encode.base.base64
 import me.leon.ext.*
+import me.leon.ext.fx.*
+import me.leon.ext.ocr.BaiduOcr
 import tornadofx.*
 
-class QrcodeView : View("Qrcode") {
+class QrcodeView : Fragment("Qrcode") {
     // 切图区域的起始位置x
     private var startX = 0.0
 
@@ -35,11 +42,22 @@ class QrcodeView : View("Qrcode") {
     private lateinit var hBox: HBox
     private lateinit var button: Button
     private lateinit var ta: TextArea
+    private lateinit var textCount: Text
 
     // 切成的图片展示区域
     private lateinit var iv: ImageView
+    private var isOcr = false
+
+    private val errorLvs = listOf("L ~7%", "M ~15%", "Q ~25%", "H ~30%")
+    private val selectedErrLv = SimpleStringProperty(errorLvs.first())
 
     override val closeable = SimpleBooleanProperty(false)
+    private val eventHandler = fileDraggedHandler {
+        ta.text =
+            runCatching { it.joinToString("\n") { "${it.name}:    ${it.qrReader()}" } }.getOrElse {
+                it.stacktrace()
+            }
+    }
 
     override val root = vbox {
         paddingAll = DEFAULT_SPACING_2X
@@ -49,10 +67,20 @@ class QrcodeView : View("Qrcode") {
             label(messages["recognize"])
             button =
                 button(messages["shotReco"]) {
-                    action { this@QrcodeView.show() }
+                    action {
+                        isOcr = false
+                        this@QrcodeView.show()
+                    }
                     shortcut(KeyCombination.valueOf("Ctrl+Q"))
                     tooltip("快捷键Ctrl+Q")
                 }
+            button("OCR") {
+                action {
+                    isOcr = true
+                    this@QrcodeView.show()
+                }
+                shortcut(KeyCombination.valueOf("Ctrl+Q"))
+            }
 
             button(messages["clipboardReco"]) {
                 action { clipboardImage()?.toBufferImage()?.qrReader()?.let { ta.text = it } }
@@ -67,6 +95,14 @@ class QrcodeView : View("Qrcode") {
                     }
                 }
             }
+            button(messages["multiFileReco"]) {
+                action {
+                    primaryStage.multiFileChooser(messages["chooseFile"])?.let {
+                        runCatching { it.joinToString("\n") { "${it.name}:    ${it.qrReader()}" } }
+                            .getOrElse { it.stacktrace() }
+                    }
+                }
+            }
         }
 
         hbox {
@@ -77,19 +113,34 @@ class QrcodeView : View("Qrcode") {
             }
             button(graphic = imageview("/img/import.png")) { action { ta.text = clipboardText() } }
         }
-        ta =
-            textarea {
-                promptText = messages["qrHint"]
-                isWrapText = true
-                prefHeight = DEFAULT_SPACING_10X
-            }
+        vbox {
+            alignment = Pos.CENTER_RIGHT
+            spacing = DEFAULT_SPACING
+            ta =
+                textarea {
+                    promptText = messages["qrHint"]
+                    isWrapText = true
+                    prefHeight = DEFAULT_SPACING_10X
+                    onDragEntered = eventHandler
+                    textProperty().addListener { _, _, newValue ->
+                        println(newValue.length)
+                        textCount.text = "text count: ${newValue.length}"
+                    }
+                }
+
+            textCount = text("text count: 0")
+        }
 
         hbox {
             spacing = DEFAULT_SPACING_2X
+            addClass(Styles.left)
+
+            combobox(selectedErrLv, errorLvs)
             button(messages["genQrcode"]) {
                 action {
                     if (ta.text.isNotEmpty()) {
-                        iv.image = createQR(ta.text)
+                        runCatching { iv.image = createQR(ta.text, selectedErrLv.get().errLevel()) }
+                            .onFailure { primaryStage.showToast(it.message ?: "unknown exception") }
                     }
                 }
                 shortcut(KeyCombination.valueOf("F9"))
@@ -233,10 +284,28 @@ class QrcodeView : View("Qrcode") {
         val screenCapture = robot.createScreenCapture(re)
         val bufferedImage = screenCapture.toFxImg()
         iv.image = bufferedImage
-        ta.text = screenCapture.qrReader()
+        runAsync {
+            runCatching {
+                if (isOcr) BaiduOcr.ocrBase64(screenCapture.toByteArray().base64())
+                else screenCapture.qrReader()
+            }
+                .getOrElse { it.stacktrace() }
+        } ui { ta.text = it }
     }
 
-    private fun createQR(data: String = "this is test data"): Image {
-        return data.createQR().toFxImg()
+    private fun createQR(
+        data: String = "this is test data",
+        errLv: ErrorCorrectionLevel = ErrorCorrectionLevel.L
+    ): Image {
+        return data.createQR(errorCorrectionLevel = errLv).toFxImg()
     }
+
+    private fun String.errLevel() =
+        when {
+            startsWith("L") -> ErrorCorrectionLevel.L
+            startsWith("M") -> ErrorCorrectionLevel.M
+            startsWith("Q") -> ErrorCorrectionLevel.Q
+            startsWith("H") -> ErrorCorrectionLevel.H
+            else -> ErrorCorrectionLevel.L
+        }
 }

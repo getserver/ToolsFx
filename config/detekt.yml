@@ -109,11 +109,11 @@ complexity:
     threshold: 600
   LongMethod:
     active: true
-    threshold: 60
+    threshold: 75
     ignoreAnnotated: []
   LongParameterList:
     active: true
-    functionThreshold: 8
+    functionThreshold: 10
     constructorThreshold: 8
     ignoreDefaultParameters: false
     ignoreDataClasses: true
@@ -139,14 +139,14 @@ complexity:
   TooManyFunctions:
     active: true
     excludes: ['**/test/**', '**/androidTest/**', '**/commonTest/**', '**/jvmTest/**', '**/jsTest/**', '**/iosTest/**']
-    thresholdInFiles: 11
-    thresholdInClasses: 14
-    thresholdInInterfaces: 11
-    thresholdInObjects: 11
-    thresholdInEnums: 11
-    ignoreDeprecated: false
-    ignorePrivate: false
-    ignoreOverridden: false
+    thresholdInFiles: 24
+    thresholdInClasses: 24
+    thresholdInInterfaces: 24
+    thresholdInObjects: 22
+    thresholdInEnums: 24
+    ignoreDeprecated: true
+    ignorePrivate: true
+    ignoreOverridden: true
 
 coroutines:
   active: true
@@ -416,7 +416,7 @@ naming:
   EnumNaming:
     active: true
     excludes: ['**/test/**', '**/androidTest/**', '**/commonTest/**', '**/jvmTest/**', '**/jsTest/**', '**/iosTest/**']
-    enumEntryPattern: '[A-Z][_a-zA-Z0-9]*'
+    enumEntryPattern: '[A-Z][_a-zA-Z0-9]*|`.*`'
   ForbiddenClassName:
     active: false
     excludes: ['**/test/**', '**/androidTest/**', '**/commonTest/**', '**/jvmTest/**', '**/jsTest/**', '**/iosTest/**']
@@ -545,7 +545,7 @@ potential-bugs:
   LateinitUsage:
     active: false
     excludes: ['**/test/**', '**/androidTest/**', '**/commonTest/**', '**/jvmTest/**', '**/jsTest/**', '**/iosTest/**']
-    excludeAnnotatedProperties: []
+    ignoreAnnotated: []
     ignoreOnClassesPattern: ''
   MapGetWithNotNullAssertionOperator:
     active: false
@@ -633,7 +633,7 @@ style:
     ignoreOverridableFunction: true
     ignoreActualFunction: true
     excludedFunctions: ''
-    excludeAnnotatedFunction:
+    ignoreAnnotated:
       - 'dagger.Provides'
   LibraryCodeMustSpecifyReturnType:
     active: true
@@ -643,7 +643,7 @@ style:
     excludes: ['**']
   LoopWithTooManyJumpStatements:
     active: true
-    maxJumpCount: 1
+    maxJumpCount: 2
   MagicNumber:
     active: false
     excludes: ['**/test/**', '**/androidTest/**', '**/commonTest/**', '**/jvmTest/**', '**/jsTest/**', '**/iosTest/**']
@@ -703,7 +703,7 @@ style:
   RedundantVisibilityModifierRule:
     active: false
   ReturnCount:
-    active: true
+    active: false
     max: 2
     excludedFunctions: 'equals'
     excludeLabeled: false
@@ -723,10 +723,10 @@ style:
     active: false
   UnderscoresInNumericLiterals:
     active: false
-    acceptableDecimalLength: 5
+    acceptableLength: 5
   UnnecessaryAbstractClass:
     active: true
-    excludeAnnotatedClasses:
+    ignoreAnnotated:
       - 'dagger.Module'
   UnnecessaryAnnotationUseSiteTarget:
     active: false
@@ -757,7 +757,7 @@ style:
     active: false
   UseDataClass:
     active: false
-    excludeAnnotatedClasses: []
+    ignoreAnnotated: []
     allowVars: false
   UseEmptyCounterpart:
     active: false

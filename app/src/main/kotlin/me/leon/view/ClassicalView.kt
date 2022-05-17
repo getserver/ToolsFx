@@ -3,50 +3,61 @@ package me.leon.view
 import javafx.beans.property.SimpleBooleanProperty
 import javafx.geometry.Pos
 import javafx.scene.control.*
-import me.leon.SimpleMsgEvent
+import kotlin.system.measureTimeMillis
+import me.leon.Styles
 import me.leon.controller.ClassicalController
 import me.leon.encode.base.base64
 import me.leon.ext.*
+import me.leon.ext.crypto.*
+import me.leon.ext.fx.*
 import tornadofx.*
 import tornadofx.FX.Companion.messages
 
-class ClassicalView : View(messages["classical"]) {
+class ClassicalView : Fragment(messages["classical"]) {
     private val controller: ClassicalController by inject()
     override val closeable = SimpleBooleanProperty(false)
     private val isSingleLine = SimpleBooleanProperty(false)
+    private val decodeIgnoreSpace = SimpleBooleanProperty(true)
+    private var encodeType = ClassicalCryptoType.CAESAR
+    private val param1Enabled = SimpleBooleanProperty(encodeType.paramsCount() > 0)
+    private val param2Enabled = SimpleBooleanProperty(encodeType.paramsCount() > 1)
     private lateinit var taInput: TextArea
     private lateinit var taOutput: TextArea
     private lateinit var tfParam1: TextField
     private lateinit var tfParam2: TextField
-    private lateinit var tfParam3: TextField
     private lateinit var labelInfo: Label
+    private var timeConsumption = 0L
     private val info: String
         get() =
             "${if (isEncrypt) messages["encode"] else messages["decode"]}: $encodeType  ${messages["inputLength"]}:" +
-                " ${inputText.length}  ${messages["outputLength"]}: ${outputText.length}"
+                " ${inputText.length}  ${messages["outputLength"]}: ${outputText.length} cost: $timeConsumption ms"
     private val inputText: String
-        get() = taInput.text
+        get() = taInput.text.takeUnless { decodeIgnoreSpace.get() } ?: taInput.text.stripAllSpace()
     private val outputText: String
         get() = taOutput.text
 
-    private var encodeType = ClassicalCryptoType.CAESAR
     private var isEncrypt = true
 
     private val cryptoParams
-        get() =
-            mutableMapOf(
-                "p1" to tfParam1.text,
-                "p2" to tfParam2.text,
-                "p3" to tfParam3.text,
-            )
+        get() = mapOf("p1" to tfParam1.text, "p2" to tfParam2.text)
 
-    private val eventHandler = fileDraggedHandler { taInput.text = it.first().readText() }
-
+    private val eventHandler = fileDraggedHandler {
+        taInput.text =
+            with(it.first()) {
+                if (length() <= 128 * 1024)
+                    if (realExtension() in unsupportedExts) "unsupported file extension"
+                    else readText()
+                else "not support file larger than 128KB"
+            }
+    }
     private val centerNode = vbox {
-        paddingAll = DEFAULT_SPACING
-        spacing = DEFAULT_SPACING
+        addClass(Styles.group)
         hbox {
+            spacing = DEFAULT_SPACING
             label(messages["input"])
+            button(graphic = imageview("/img/openwindow.png")) {
+                action { find<ClassicalView>().openWindow() }
+            }
             button(graphic = imageview("/img/import.png")) {
                 action { taInput.text = clipboardText() }
             }
@@ -82,15 +93,12 @@ class ClassicalView : View(messages["classical"]) {
                 }
             }
         hbox {
-            alignment = Pos.CENTER_LEFT
-            paddingTop = DEFAULT_SPACING
-            paddingBottom = DEFAULT_SPACING
-            spacing = DEFAULT_SPACING
+            addClass(Styles.left)
             label("${messages["encrypt"]}:")
             tilepane {
                 vgap = 8.0
                 alignment = Pos.TOP_LEFT
-                prefColumns = 6
+                prefColumns = 7
                 togglegroup {
                     classicalTypeMap.forEach {
                         radiobutton(it.key) {
@@ -100,7 +108,17 @@ class ClassicalView : View(messages["classical"]) {
                     }
                     selectedToggleProperty().addListener { _, _, new ->
                         encodeType = new.cast<RadioButton>().text.classicalType()
+                        param1Enabled.set(encodeType.paramsCount() > 0)
+                        param2Enabled.set(encodeType.paramsCount() > 1)
+                        tfParam1.promptText = encodeType.paramsHints()[0]
+                        tfParam2.promptText = encodeType.paramsHints()[1]
+                        decodeIgnoreSpace.set(encodeType.isIgnoreSpace())
+
                         if (isEncrypt) run()
+                        else {
+                            timeConsumption = 0
+                            labelInfo.text = info
+                        }
                     }
                 }
             }
@@ -108,19 +126,29 @@ class ClassicalView : View(messages["classical"]) {
         hbox {
             spacing = DEFAULT_SPACING
             alignment = Pos.BASELINE_CENTER
-            tfParam1 = textfield { promptText = "param1" }
-            tfParam2 = textfield { promptText = "param2" }
-            tfParam3 = textfield { promptText = "param3" }
+            tfParam1 =
+                textfield {
+                    prefWidth = DEFAULT_SPACING_40X
+                    promptText = encodeType.paramsHints()[0]
+                    visibleWhen(param1Enabled)
+                }
+            tfParam2 =
+                textfield {
+                    prefWidth = DEFAULT_SPACING_40X
+                    promptText = encodeType.paramsHints()[1]
+                    visibleWhen(param2Enabled)
+                }
         }
 
         hbox {
             spacing = DEFAULT_SPACING
-            alignment = Pos.CENTER_LEFT
+            alignment = Pos.CENTER
             togglegroup {
                 spacing = DEFAULT_SPACING
-                alignment = Pos.BASELINE_CENTER
+                alignment = Pos.CENTER
                 radiobutton(messages["encrypt"]) { isSelected = true }
                 radiobutton(messages["decrypt"])
+                checkbox(messages["decodeIgnoreSpace"], decodeIgnoreSpace)
                 checkbox(messages["singleLine"], isSingleLine)
                 selectedToggleProperty().addListener { _, _, new ->
                     isEncrypt = new.cast<RadioButton>().text == messages["encrypt"]
@@ -146,26 +174,46 @@ class ClassicalView : View(messages["classical"]) {
             textarea {
                 promptText = messages["outputHint"]
                 isWrapText = true
+                contextmenu {
+                    item("uppercase") { action { taOutput.text = taOutput.text.uppercase() } }
+                    item("lowercase") { action { taOutput.text = taOutput.text.lowercase() } }
+                    item("reverse") {
+                        action {
+                            taOutput.text =
+                                taOutput.text.split("\r\n|\n".toRegex()).joinToString("\r\n") {
+                                    it.reversed()
+                                }
+                        }
+                    }
+
+                    item("clear") { action { taOutput.text = "" } }
+                }
             }
     }
+
     override val root = borderpane {
         center = centerNode
         bottom = hbox { labelInfo = label(info) }
     }
 
     private fun run() {
-        taOutput.text =
-            if (isEncrypt)
-                controller.encrypt(
-                    inputText,
-                    encodeType,
-                    cryptoParams,
-                    isSingleLine.get(),
-                )
-            else controller.decrypt(inputText, encodeType, cryptoParams, isSingleLine.get())
-        if (Prefs.autoCopy) outputText.copy().also { primaryStage.showToast(messages["copied"]) }
-        labelInfo.text = info
-
-        fire(SimpleMsgEvent(taOutput.text, 1))
+        measureTimeMillis {
+            taOutput.text =
+                if (isEncrypt)
+                    controller.encrypt(
+                        inputText,
+                        encodeType,
+                        cryptoParams,
+                        isSingleLine.get(),
+                    )
+                else controller.decrypt(inputText, encodeType, cryptoParams, isSingleLine.get())
+            if (Prefs.autoCopy)
+                outputText.copy().also { primaryStage.showToast(messages["copied"]) }
+            //            fire(SimpleMsgEvent(taOutput.text, 1))
+        }
+            .also {
+                timeConsumption = it
+                labelInfo.text = info
+            }
     }
 }
